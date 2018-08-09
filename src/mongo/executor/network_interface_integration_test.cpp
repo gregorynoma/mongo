@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <unistd.h>
 
 #include "mongo/base/status_with.h"
 #include "mongo/client/connection_string.h"
@@ -67,11 +68,6 @@ bool pingCommandMissing(const RemoteCommandResponse& result) {
     return false;
 }
 
-TEST_F(NetworkInterfaceIntegrationFixture, Ping) {
-    startNet();
-    assertCommandOK("admin", BSON("ping" << 1));
-}
-
 // Hook that intentionally never finishes
 class HangingHook : public executor::NetworkConnectionHook {
     Status validateHost(const HostAndPort&,
@@ -102,15 +98,6 @@ class HangingHook : public executor::NetworkConnectionHook {
                 "No ping command. Simulating timeout"};
     }
 };
-
-
-// Test that we time out a command if the connection hook hangs.
-TEST_F(NetworkInterfaceIntegrationFixture, HookHangs) {
-    startNet(stdx::make_unique<HangingHook>());
-
-    assertCommandFailsOnClient(
-        "admin", BSON("ping" << 1), ErrorCodes::NetworkInterfaceExceededTimeLimit, Seconds(1));
-}
 
 using ResponseStatus = TaskExecutor::ResponseStatus;
 
@@ -198,173 +185,22 @@ private:
     boost::optional<IsMasterData> _isMasterResult;
 };
 
-TEST_F(NetworkInterfaceTest, CancelMissingOperation) {
-    // This is just a sanity check, this action should have no effect.
-    net().cancelCommand(makeCallbackHandle());
-    assertNumOps(0u, 0u, 0u, 0u);
-}
+TEST_F(NetworkInterfaceTest, ToppleMongos) {
+    BSONObj obj = BSON("find" << "doc");
+    auto request1 = RemoteCommandRequest(HostAndPort("172.31.61.190:28003"), "db1", obj, BSONObj(), nullptr);
+    auto request2 = RemoteCommandRequest(HostAndPort("172.31.61.190:28003"), "db2", obj, BSONObj(), nullptr);
 
-TEST_F(NetworkInterfaceTest, CancelOperation) {
-    auto cbh = makeCallbackHandle();
-
-    // Kick off our operation
-    FailPointEnableBlock fpb("networkInterfaceDiscardCommandsAfterAcquireConn");
-
-    auto deferred = runCommand(cbh, makeTestCommand());
-
-    waitForIsMaster();
-
-    net().cancelCommand(cbh);
-
-    // Wait for op to complete, assert that it was canceled.
-    auto result = deferred.get();
-    ASSERT_EQ(ErrorCodes::CallbackCanceled, result.status);
-    ASSERT(result.elapsedMillis);
-    assertNumOps(1u, 0u, 0u, 0u);
-}
-
-TEST_F(NetworkInterfaceTest, ImmediateCancel) {
-    auto cbh = makeCallbackHandle();
-
-    // Kick off our operation
-
-    FailPointEnableBlock fpb("networkInterfaceDiscardCommandsBeforeAcquireConn");
-
-    auto deferred = runCommand(cbh, makeTestCommand());
-
-    net().cancelCommand(cbh);
-
-    ASSERT_FALSE(hasIsMaster());
-
-    // Wait for op to complete, assert that it was canceled.
-    auto result = deferred.get();
-    ASSERT_EQ(ErrorCodes::CallbackCanceled, result.status);
-    ASSERT(result.elapsedMillis);
-    assertNumOps(1u, 0u, 0u, 0u);
-}
-
-TEST_F(NetworkInterfaceTest, LateCancel) {
-    auto cbh = makeCallbackHandle();
-
-    auto deferred = runCommand(cbh, makeTestCommand());
-
-    // Wait for op to complete, assert that it was canceled.
-    auto result = deferred.get();
-    net().cancelCommand(cbh);
-
-    ASSERT(result.isOK());
-    ASSERT(result.elapsedMillis);
-    assertNumOps(0u, 0u, 0u, 1u);
-}
-
-TEST_F(NetworkInterfaceTest, AsyncOpTimeout) {
-    // Kick off operation
-    auto cb = makeCallbackHandle();
-    auto request = makeTestCommand(Milliseconds{1000});
-    request.cmdObj = BSON("sleep" << 1 << "lock"
-                                  << "none"
-                                  << "secs"
-                                  << 1000000000);
-    auto deferred = runCommand(cb, request);
-
-    waitForIsMaster();
-
-    auto result = deferred.get();
-
-    // mongos doesn't implement the ping command, so ignore the response there, otherwise
-    // check that we've timed out.
-    if (!pingCommandMissing(result)) {
-        ASSERT_EQ(ErrorCodes::NetworkInterfaceExceededTimeLimit, result.status);
-        ASSERT(result.elapsedMillis);
-        assertNumOps(0u, 1u, 0u, 0u);
+    while (true) {
+        runCommand(makeCallbackHandle(), request1)
+            .getAsync([](StatusWith<RemoteCommandResponse> res) {
+                //std::cout << res.getValue() << std::endl;
+            });
+        runCommand(makeCallbackHandle(), request2)
+            .getAsync([](StatusWith<RemoteCommandResponse> res) {
+                //std::cout << res.getValue() << std::endl;
+            });
+        usleep(500u);
     }
-}
-
-TEST_F(NetworkInterfaceTest, StartCommand) {
-    auto commandRequest = BSON("echo" << 1 << "boop"
-                                      << "bop");
-
-    // This opmsg request expect the following reply, which is generated below
-    // { echo: { echo: 1, boop: "bop", $db: "admin" }, ok: 1.0 }
-    auto expectedCommandReply = [&] {
-        BSONObjBuilder echoed;
-        echoed.appendElements(commandRequest);
-        echoed << "$db"
-               << "admin";
-        return echoed.obj();
-    }();
-    auto request = makeTestCommand(boost::none, commandRequest);
-
-    auto deferred = runCommand(makeCallbackHandle(), std::move(request));
-
-    auto res = deferred.get();
-
-    ASSERT(res.elapsedMillis);
-    uassertStatusOK(res.status);
-    ASSERT_BSONOBJ_EQ(res.data.getObjectField("echo"), expectedCommandReply);
-    ASSERT_EQ(res.data.getIntField("ok"), 1);
-    assertNumOps(0u, 0u, 0u, 1u);
-}
-
-TEST_F(NetworkInterfaceTest, SetAlarm) {
-    // set a first alarm, to execute after "expiration"
-    Date_t expiration = net().now() + Milliseconds(100);
-    auto makeTimerFuture = [&] {
-        auto pf = makePromiseFuture<Date_t>();
-        return std::make_pair(
-            [ this, promise = pf.promise.share() ]() mutable { promise.emplaceValue(net().now()); },
-            std::move(pf.future));
-    };
-
-    auto futurePair = makeTimerFuture();
-    ASSERT_OK(net().setAlarm(expiration, std::move(futurePair.first)));
-
-    // assert that it executed after "expiration"
-    auto& result = futurePair.second.get();
-    ASSERT(result >= expiration);
-
-    expiration = net().now() + Milliseconds(99999999);
-    auto futurePair2 = makeTimerFuture();
-    ASSERT_OK(net().setAlarm(expiration, std::move(futurePair2.first)));
-
-    net().shutdown();
-    ASSERT_TRUE(!futurePair2.second.isReady());
-}
-
-TEST_F(NetworkInterfaceTest, IsMasterRequestContainsOutgoingWireVersionInternalClientInfo) {
-    WireSpec::instance().isInternalClient = true;
-
-    auto deferred = runCommand(makeCallbackHandle(), makeTestCommand());
-    auto isMasterHandshake = waitForIsMaster();
-
-    // Verify that the isMaster reply has the expected internalClient data.
-    auto internalClientElem = isMasterHandshake.request["internalClient"];
-    ASSERT_EQ(internalClientElem.type(), BSONType::Object);
-    auto minWireVersionElem = internalClientElem.Obj()["minWireVersion"];
-    auto maxWireVersionElem = internalClientElem.Obj()["maxWireVersion"];
-    ASSERT_EQ(minWireVersionElem.type(), BSONType::NumberInt);
-    ASSERT_EQ(maxWireVersionElem.type(), BSONType::NumberInt);
-    ASSERT_EQ(minWireVersionElem.numberInt(), WireSpec::instance().outgoing.minWireVersion);
-    ASSERT_EQ(maxWireVersionElem.numberInt(), WireSpec::instance().outgoing.maxWireVersion);
-
-    // Verify that the ping op is counted as a success.
-    auto res = deferred.get();
-    ASSERT(res.elapsedMillis);
-    assertNumOps(0u, 0u, 0u, 1u);
-}
-
-TEST_F(NetworkInterfaceTest, IsMasterRequestMissingInternalClientInfoWhenNotInternalClient) {
-    WireSpec::instance().isInternalClient = false;
-
-    auto deferred = runCommand(makeCallbackHandle(), makeTestCommand());
-    auto isMasterHandshake = waitForIsMaster();
-
-    // Verify that the isMaster reply has the expected internalClient data.
-    ASSERT_FALSE(isMasterHandshake.request["internalClient"]);
-    // Verify that the ping op is counted as a success.
-    auto res = deferred.get();
-    ASSERT(res.elapsedMillis);
-    assertNumOps(0u, 0u, 0u, 1u);
 }
 
 }  // namespace
