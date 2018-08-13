@@ -257,9 +257,10 @@ int runQueryWithReadCommands(DBClientBase* conn,
             qr->getBatchSize()
                 ? boost::optional<std::int64_t>(static_cast<std::int64_t>(*qr->getBatchSize()))
                 : boost::none,
-            boost::none,   // maxTimeMS
-            boost::none,   // term
-            boost::none);  // lastKnownCommittedOpTime
+            boost::none,  // maxTimeMS
+            boost::none,  // term
+            boost::none,  // lastKnownCommittedOpTime
+            false);       // tempOptInToDocumentSequences
         BSONObj getMoreCommandResult;
         uassert(ErrorCodes::CommandFailed,
                 str::stream() << "getMore command failed; reply was: " << getMoreCommandResult,
@@ -1023,10 +1024,11 @@ void BenchRunOp::executeOnce(DBClientBase* conn,
                 while (cursorResponse.getCursorId() != 0) {
                     GetMoreRequest getMoreRequest(cursorResponse.getNSS(),
                                                   cursorResponse.getCursorId(),
-                                                  boost::none,   // batchSize
-                                                  boost::none,   // maxTimeMS
-                                                  boost::none,   // term
-                                                  boost::none);  // lastKnownCommittedOpTime
+                                                  boost::none,  // batchSize
+                                                  boost::none,  // maxTimeMS
+                                                  boost::none,  // term
+                                                  boost::none,  // lastKnownCommittedOpTime
+                                                  false);       // tempOptInToDocumentSequences
                     BSONObj getMoreCommandResult;
                     uassert(ErrorCodes::CommandFailed,
                             str::stream() << "getMore command failed; reply was: "

@@ -141,9 +141,10 @@ Message DBClientCursor::_assembleGetMore() {
         auto gmr = GetMoreRequest(ns,
                                   cursorId,
                                   boost::make_optional(batchSize != 0, batchSize),
-                                  boost::none,   // awaitDataTimeout
-                                  boost::none,   // term
-                                  boost::none);  // lastKnownCommittedOptime
+                                  boost::none,  // awaitDataTimeout
+                                  boost::none,  // term
+                                  boost::none,  // lastKnownCommittedOptime
+                                  false);       // tempOptInToDocumentSequences
         return assembleCommandRequest(_client, ns.db(), opts, gmr.toBSON());
     } else {
         // Assemble a legacy getMore request.

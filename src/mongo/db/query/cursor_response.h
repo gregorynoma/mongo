@@ -58,9 +58,8 @@ public:
 
     /**
      * Once constructed, you may not use the passed-in ReplyBuilderInterface until you call either
-     * done()
-     * or abandon(), or this object goes out of scope. This is the same as the rule when using a
-     * BSONObjBuilder to build a sub-object with subobjStart().
+     * done() or abandon(), or this object goes out of scope. This is the same as the rule when
+     * using a BSONObjBuilder to build a sub-object with subobjStart().
      *
      * If the builder goes out of scope without a call to done(), the ReplyBuilderInterface will be
      * reset.
@@ -237,6 +236,18 @@ public:
     }
 
     /**
+     * Converts this response to its representation in a ReplyBuilderInterface. Note that this
+     * begins a body and adding any DocumentSequences to the reply after this call is illegal.
+     */
+    void addToReply(ResponseType responseType,
+                    bool useDocumentSequences,
+                    rpc::ReplyBuilderInterface* reply) const;
+
+    void addToReplyWithoutWriteConcern(ResponseType responseType,
+                                       bool useDocumentSequences,
+                                       rpc::ReplyBuilderInterface* reply) const;
+
+    /**
      * Converts this response to its raw BSON representation.
      */
     BSONObj toBSON(ResponseType responseType) const;
@@ -246,6 +257,16 @@ public:
     }
 
 private:
+    void _appendCursor(CursorResponse::ResponseType responseType,
+                       bool useDocumentSequences,
+                       bool appendWriteConcern,
+                       BSONObjBuilder* builder) const;
+
+    void _addToReply(ResponseType responseType,
+                     bool useDocumentSequences,
+                     bool appendWriteConcern,
+                     rpc::ReplyBuilderInterface* reply) const;
+
     NamespaceString _nss;
     CursorId _cursorId;
     std::vector<BSONObj> _batch;

@@ -272,7 +272,6 @@ public:
                                              expCtx,
                                              extensionsCallback,
                                              MatchExpressionParser::kAllowAllSpecialFeatures));
-
             if (ctx->getView()) {
                 // Relinquish locks. The aggregation command will re-acquire them.
                 ctx.reset();
@@ -304,14 +303,17 @@ public:
                 CurOp::get(opCtx)->setPlanSummary_inlock(Explain::getPlanSummary(exec.get()));
             }
 
+            const auto useDocSequences = cq->getQueryRequest().getTempOptInToDocumentSequences();
+
             if (!collection) {
                 // No collection. Just fill out curop indicating that there were zero results and
                 // there is no ClientCursor id, and then return.
                 const long long numResults = 0;
                 const CursorId cursorId = 0;
                 endQueryOp(opCtx, collection, *exec, numResults, cursorId);
-                auto bodyBuilder = result->getBodyBuilder();
-                appendCursorResponseObject(cursorId, nss.ns(), BSONArray(), &bodyBuilder);
+                CursorResponse(nss, cursorId, {})
+                    .addToReply(
+                        CursorResponse::ResponseType::InitialResponse, useDocSequences, result);
                 return;
             }
 
@@ -323,6 +325,7 @@ public:
             // Stream query results, adding them to a BSONArray as we go.
             CursorResponseBuilder::Options options;
             options.isInitialResponse = true;
+            options.useDocumentSequences = useDocSequences;
             CursorResponseBuilder firstBatch(result, options);
             BSONObj obj;
             PlanExecutor::ExecState state = PlanExecutor::ADVANCED;

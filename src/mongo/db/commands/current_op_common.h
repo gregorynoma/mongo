@@ -75,7 +75,7 @@ private:
      * if successful or a Status containing the error otherwise.
      */
     virtual StatusWith<CursorResponse> runAggregation(OperationContext* opCtx,
-                                                      const AggregationRequest& request) const = 0;
+                                                      AggregationRequest& request) const = 0;
 
     /**
      * Allows overriders to optionally write additional data to the response object before the final

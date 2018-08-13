@@ -97,6 +97,7 @@ const char kOplogReplayField[] = "oplogReplay";
 const char kNoCursorTimeoutField[] = "noCursorTimeout";
 const char kAwaitDataField[] = "awaitData";
 const char kPartialResultsField[] = "allowPartialResults";
+const char kTempOptInToDocumentSequencesField[] = "tempOptInToDocumentSequences";
 const char kTermField[] = "term";
 const char kOptionsField[] = "options";
 
@@ -333,6 +334,13 @@ StatusWith<unique_ptr<QueryRequest>> QueryRequest::parseFromFindCommand(unique_p
             }
 
             qr->_allowPartialResults = el.boolean();
+        } else if (fieldName == kTempOptInToDocumentSequencesField) {
+            Status status = checkFieldType(el, Bool);
+            if (!status.isOK()) {
+                return status;
+            }
+
+            qr->_tempOptInToDocumentSequences = el.boolean();
         } else if (fieldName == kOptionsField) {
             // 3.0.x versions of the shell may generate an explain of a find command with an
             // 'options' field. We accept this only if the 'options' field is empty so that
@@ -504,6 +512,10 @@ void QueryRequest::asFindCommand(BSONObjBuilder* cmdBuilder) const {
 
     if (_allowPartialResults) {
         cmdBuilder->append(kPartialResultsField, true);
+    }
+
+    if (_tempOptInToDocumentSequences) {
+        cmdBuilder->append(kTempOptInToDocumentSequencesField, true);
     }
 
     if (_replicationTerm) {

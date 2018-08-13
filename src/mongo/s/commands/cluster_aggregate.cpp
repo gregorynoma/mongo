@@ -107,16 +107,25 @@ Document wrapAggAsExplain(Document aggregateCommand, ExplainOptions::Verbosity v
 }
 
 Status appendCursorResponseToCommandResult(const ShardId& shardId,
-                                           const BSONObj cursorResponse,
-                                           BSONObjBuilder* result) {
+                                           const RemoteCursorResponse& possibleCursor,
+                                           const bool useDocSequences,
+                                           rpc::ReplyBuilderInterface* result) {
+    if (possibleCursor.cursor) {
+        possibleCursor.cursor->addToReplyWithoutWriteConcern(
+            CursorResponse::ResponseType::InitialResponse, useDocSequences, result);
+    }
+    auto bodyBuilder = result->getBodyBuilder();
     // If a write error was encountered, append it to the output buffer first.
-    if (auto wcErrorElem = cursorResponse["writeConcernError"]) {
-        appendWriteConcernErrorToCmdResponse(shardId, wcErrorElem, *result);
+    if (auto wcErrorElem = possibleCursor.response["writeConcernError"]) {
+        appendWriteConcernErrorToCmdResponse(shardId, wcErrorElem, bodyBuilder);
     }
 
-    // Pass the results from the remote shard into our command response.
-    result->appendElementsUnique(CommandHelpers::filterCommandReplyForPassthrough(cursorResponse));
-    return getStatusFromCommandResult(result->asTempObj());
+    // Pass the results from the remote shard into our command response if we don't have a cursor.
+    if (!possibleCursor.cursor) {
+        bodyBuilder.appendElementsUnique(
+            CommandHelpers::filterCommandReplyForPassthrough(possibleCursor.response));
+    }
+    return getStatusFromCommandResult(bodyBuilder.asTempObj());
 }
 
 bool mustRunOnAllShards(const NamespaceString& nss, const LiteParsedPipeline& litePipe) {
@@ -173,6 +182,7 @@ BSONObj createCommandForTargetedShards(
     // Create the command for the shards.
     MutableDocument targetedCmd(request.serializeToCommandObj());
     targetedCmd[AggregationRequest::kFromMongosName] = Value(true);
+    targetedCmd[AggregationRequest::kTempOptInToDocumentSequencesName] = Value(false);
 
     // If 'pipelineForTargetedShards' is 'nullptr', this is an unsharded direct passthrough.
     if (pipelineForTargetedShards) {
@@ -225,6 +235,7 @@ BSONObj createCommandForMergingShard(const AggregationRequest& request,
     mergeCmd["pipeline"] = Value(pipelineForMerging->serialize());
     mergeCmd[AggregationRequest::kFromMongosName] = Value(true);
     mergeCmd["writeConcern"] = Value(originalCmdObj["writeConcern"]);
+    mergeCmd[AggregationRequest::kTempOptInToDocumentSequencesName] = Value(false);
 
     // If the user didn't specify a collation already, make sure there's a collation attached to
     // the merge command, since the merging shard may not have the collection metadata.
@@ -502,7 +513,7 @@ Shard::CommandResponse establishMergingShardCursor(OperationContext* opCtx,
                                                        Shard::RetryPolicy::kIdempotent));
 }
 
-BSONObj establishMergingMongosCursor(
+CursorResponse establishMergingMongosCursor(
     OperationContext* opCtx,
     const AggregationRequest& request,
     const NamespaceString& requestedNss,
@@ -528,13 +539,9 @@ BSONObj establishMergingMongosCursor(
 
     auto cursorState = ClusterCursorManager::CursorState::NotExhausted;
 
-    rpc::OpMsgReplyBuilder replyBuilder;
-    CursorResponseBuilder::Options options;
-    options.isInitialResponse = true;
-
-    CursorResponseBuilder responseBuilder(&replyBuilder, options);
-
-    for (long long objCount = 0; objCount < request.getBatchSize(); ++objCount) {
+    std::vector<BSONObj> batch;
+    size_t bytesUsed = 0;
+    while (batch.size() < static_cast<size_t>(request.getBatchSize())) {
         ClusterQueryResult next;
         try {
             next = uassertStatusOK(ccc->next(RouterExecStage::ExecContext::kInitialFind));
@@ -562,12 +569,13 @@ BSONObj establishMergingMongosCursor(
         // to be returned on the next getMore.
         auto nextObj = *next.getResult();
 
-        if (!FindCommon::haveSpaceForNext(nextObj, objCount, responseBuilder.bytesUsed())) {
+        if (!FindCommon::haveSpaceForNext(nextObj, batch.size(), bytesUsed)) {
             ccc->queueResult(nextObj);
             break;
         }
 
-        responseBuilder.append(nextObj);
+        bytesUsed += nextObj.objsize();
+        batch.push_back(std::move(nextObj));
     }
 
     ccc->detachFromOperationContext();
@@ -592,15 +600,9 @@ BSONObj establishMergingMongosCursor(
     }
     CurOp::get(opCtx)->debug().nShards = std::max(CurOp::get(opCtx)->debug().nShards, nShards);
     CurOp::get(opCtx)->debug().cursorExhausted = (clusterCursorId == 0);
-    CurOp::get(opCtx)->debug().nreturned = responseBuilder.numDocs();
+    CurOp::get(opCtx)->debug().nreturned = batch.size();
 
-    responseBuilder.done(clusterCursorId, requestedNss.ns());
-
-    auto bodyBuilder = replyBuilder.getBodyBuilder();
-    CommandHelpers::appendSimpleCommandStatus(bodyBuilder, true);
-    bodyBuilder.doneFast();
-
-    return replyBuilder.releaseBody();
+    return CursorResponse(requestedNss, clusterCursorId, std::move(batch));
 }
 
 /**
@@ -779,7 +781,7 @@ Status runPipelineOnMongoS(const boost::intrusive_ptr<ExpressionContext>& expCtx
                            BSONObj cmdObj,
                            const LiteParsedPipeline& litePipe,
                            std::unique_ptr<Pipeline, PipelineDeleter> pipeline,
-                           BSONObjBuilder* result) {
+                           rpc::ReplyBuilderInterface* result) {
     // We should never receive a pipeline intended for the shards, or which cannot run on mongoS.
     invariant(!pipeline->isSplitForShards());
     invariant(pipeline->canRunOnMongos());
@@ -796,9 +798,10 @@ Status runPipelineOnMongoS(const boost::intrusive_ptr<ExpressionContext>& expCtx
                 !pipeline->getSources().front()->constraints().requiresInputDocSource);
 
     if (expCtx->explain && !pipeline->isSplitForMerge()) {
-        *result << "splitPipeline" << BSONNULL << "mongos"
-                << Document{{"host", getHostNameCachedAndPort()},
-                            {"stages", pipeline->writeExplainOps(*expCtx->explain)}};
+        auto bodyBuilder = result->getBodyBuilder();
+        bodyBuilder << "splitPipeline" << BSONNULL << "mongos"
+                    << Document{{"host", getHostNameCachedAndPort()},
+                                {"stages", pipeline->writeExplainOps(*expCtx->explain)}};
         return Status::OK();
     }
 
@@ -807,9 +810,13 @@ Status runPipelineOnMongoS(const boost::intrusive_ptr<ExpressionContext>& expCtx
         opCtx, request, requestedNss, cmdObj, litePipe, std::move(pipeline));
 
     // We don't need to storePossibleCursor or propagate writeConcern errors; an $out pipeline
-    // can never run on mongoS. Filter the command response and return immediately.
-    CommandHelpers::filterCommandReplyForPassthrough(cursorResponse, result);
-    return getStatusFromCommandResult(result->asTempObj());
+    // can never run on mongoS.
+    cursorResponse.addToReply(CursorResponse::ResponseType::InitialResponse,
+                              request.getTempOptInToDocumentSequences(),
+                              result);
+    auto bodyBuilder = result->getBodyBuilder();
+    CommandHelpers::appendSimpleCommandStatus(bodyBuilder, true);
+    return getStatusFromCommandResult(bodyBuilder.asTempObj());
 }
 
 Status dispatchMergingPipeline(const boost::intrusive_ptr<ExpressionContext>& expCtx,
@@ -819,7 +826,7 @@ Status dispatchMergingPipeline(const boost::intrusive_ptr<ExpressionContext>& ex
                                const LiteParsedPipeline& litePipe,
                                const boost::optional<CachedCollectionRoutingInfo>& routingInfo,
                                DispatchShardPipelineResults&& shardDispatchResults,
-                               BSONObjBuilder* result) {
+                               rpc::ReplyBuilderInterface* result) {
     // We should never be in a situation where we call this function on a non-merge pipeline.
     invariant(shardDispatchResults.splitPipeline);
     auto* mergePipeline = shardDispatchResults.splitPipeline->mergePipeline.get();
@@ -869,6 +876,9 @@ Status dispatchMergingPipeline(const boost::intrusive_ptr<ExpressionContext>& ex
                                               targetedShards,
                                               routingInfo->db().primaryId());
 
+    // TODO: SERVER-36287 Enable DocumentSequence returns internally.
+    const auto useDocumentSequences = request.getTempOptInToDocumentSequences();
+    request.setTempOptInToDocumentSequences(false);
     auto mergeCmdObj = createCommandForMergingShard(request, expCtx, cmdObj, mergePipeline);
 
     // Dispatch $mergeCursors to the chosen shard, store the resulting cursor, and return.
@@ -878,18 +888,25 @@ Status dispatchMergingPipeline(const boost::intrusive_ptr<ExpressionContext>& ex
     auto mergeCursorResponse = uassertStatusOK(storePossibleCursor(
         opCtx, namespaces.requestedNss, mergingShardId, mergeResponse, expCtx->tailableMode));
 
-    return appendCursorResponseToCommandResult(mergingShardId, mergeCursorResponse, result);
+    request.setTempOptInToDocumentSequences(useDocumentSequences);
+    return appendCursorResponseToCommandResult(
+        mergingShardId, mergeCursorResponse, useDocumentSequences, result);
 }
 
 void appendEmptyResultSetWithStatus(OperationContext* opCtx,
                                     const NamespaceString& nss,
                                     Status status,
-                                    BSONObjBuilder* result) {
+                                    bool useDocumentSequences,
+                                    rpc::ReplyBuilderInterface* reply) {
     // Rewrite ShardNotFound as NamespaceNotFound so that appendEmptyResultSet swallows it.
     if (status == ErrorCodes::ShardNotFound) {
         status = {ErrorCodes::NamespaceNotFound, status.reason()};
     }
-    appendEmptyResultSet(opCtx, *result, status, nss.ns());
+    auto cursor = makeEmptyResultSetCursorResponse(opCtx, status, nss);
+    if (cursor) {
+        cursor->addToReply(
+            CursorResponse::ResponseType::InitialResponse, useDocumentSequences, reply);
+    }
 }
 
 }  // namespace
@@ -898,7 +915,7 @@ Status ClusterAggregate::runAggregate(OperationContext* opCtx,
                                       const Namespaces& namespaces,
                                       const AggregationRequest& request,
                                       BSONObj cmdObj,
-                                      BSONObjBuilder* result) {
+                                      rpc::ReplyBuilderInterface* result) {
     auto executionNsRoutingInfoStatus = getExecutionNsRoutingInfo(opCtx, namespaces.executionNss);
     boost::optional<CachedCollectionRoutingInfo> routingInfo;
     LiteParsedPipeline litePipe(request);
@@ -913,11 +930,15 @@ Status ClusterAggregate::runAggregate(OperationContext* opCtx,
         routingInfo = std::move(executionNsRoutingInfoStatus.getValue());
     } else if (!(litePipe.hasChangeStream() &&
                  executionNsRoutingInfoStatus == ErrorCodes::NamespaceNotFound)) {
-        appendEmptyResultSetWithStatus(
-            opCtx, namespaces.requestedNss, executionNsRoutingInfoStatus.getStatus(), result);
+        appendEmptyResultSetWithStatus(opCtx,
+                                       namespaces.requestedNss,
+                                       executionNsRoutingInfoStatus.getStatus(),
+                                       request.getTempOptInToDocumentSequences(),
+                                       result);
         return Status::OK();
     }
 
+    const auto useDocumentSequences = request.getTempOptInToDocumentSequences();
     // Determine whether this aggregation must be dispatched to all shards in the cluster.
     const bool mustRunOnAll = mustRunOnAllShards(namespaces.executionNss, litePipe);
 
@@ -935,6 +956,8 @@ Status ClusterAggregate::runAggregate(OperationContext* opCtx,
         return aggPassthrough(opCtx, namespaces, primaryShardId, cmdObj, request, litePipe, result);
     }
 
+    // TODO: SERVER-36287 Enable DocumentSequence returns internally.
+    request.setTempOptInToDocumentSequences(false);
     // Populate the collection UUID and the appropriate collation to use.
     auto collInfo = getCollationAndUUID(routingInfo, namespaces.executionNss, request);
     BSONObj collationObj = collInfo.first;
@@ -951,6 +974,7 @@ Status ClusterAggregate::runAggregate(OperationContext* opCtx,
 
     // Check whether the entire pipeline must be run on mongoS.
     if (pipeline->requiredToRunOnMongos()) {
+        request.setTempOptInToDocumentSequences(useDocumentSequences);
         return runPipelineOnMongoS(
             expCtx, namespaces, request, cmdObj, litePipe, std::move(pipeline), result);
     }
@@ -964,11 +988,13 @@ Status ClusterAggregate::runAggregate(OperationContext* opCtx,
                                                       std::move(pipeline),
                                                       collationObj);
 
+    request.setTempOptInToDocumentSequences(useDocumentSequences);
     // If the operation is an explain, then we verify that it succeeded on all targeted shards,
     // write the results to the output builder, and return immediately.
     if (expCtx->explain) {
         uassertAllShardsSupportExplain(shardDispatchResults.remoteExplainOutput);
-        return appendExplainResults(std::move(shardDispatchResults), expCtx, result);
+        auto bodyBuilder = result->getBodyBuilder();
+        return appendExplainResults(std::move(shardDispatchResults), expCtx, &bodyBuilder);
     }
 
     // If this isn't an explain, then we must have established cursors on at least one shard.
@@ -981,7 +1007,7 @@ Status ClusterAggregate::runAggregate(OperationContext* opCtx,
         const auto reply = uassertStatusOK(storePossibleCursor(
             opCtx, namespaces.requestedNss, remoteCursor, expCtx->tailableMode));
         return appendCursorResponseToCommandResult(
-            remoteCursor.getShardId().toString(), reply, result);
+            remoteCursor.getShardId().toString(), reply, useDocumentSequences, result);
     }
 
     // If we reach here, we have a merge pipeline to dispatch.
@@ -1020,7 +1046,10 @@ Status ClusterAggregate::aggPassthrough(OperationContext* opCtx,
                                         BSONObj cmdObj,
                                         const AggregationRequest& aggRequest,
                                         const LiteParsedPipeline& liteParsedPipeline,
-                                        BSONObjBuilder* out) {
+                                        rpc::ReplyBuilderInterface* out) {
+    // TODO: SERVER-36287 Enable DocumentSequence returns internally.
+    const auto useDocSequences = aggRequest.getTempOptInToDocumentSequences();
+    aggRequest.setTempOptInToDocumentSequences(false);
     // Temporary hack. See comment on declaration for details.
     auto swShard = Grid::get(opCtx)->shardRegistry()->getShard(opCtx, shardId);
     if (!swShard.isOK()) {
@@ -1054,6 +1083,7 @@ Status ClusterAggregate::aggPassthrough(OperationContext* opCtx,
     }
 
     BSONObj result;
+    boost::optional<CursorResponse> cursorResp;
     if (aggRequest.getExplain()) {
         // If this was an explain, then we get back an explain result object rather than a cursor.
         result = cmdResponse.response;
@@ -1061,23 +1091,33 @@ Status ClusterAggregate::aggPassthrough(OperationContext* opCtx,
         auto tailMode = liteParsedPipeline.hasChangeStream()
             ? TailableModeEnum::kTailableAndAwaitData
             : TailableModeEnum::kNormal;
-        result = uassertStatusOK(storePossibleCursor(
+        auto remoteCursorResponse = uassertStatusOK(storePossibleCursor(
             opCtx, namespaces.requestedNss, shard->getId(), cmdResponse, tailMode));
+        result = remoteCursorResponse.response;
+        cursorResp = std::move(remoteCursorResponse.cursor);
     }
 
-    // First append the properly constructed writeConcernError. It will then be skipped
-    // in appendElementsUnique.
+    // First append the properly constructed writeConcernError and Cursor. It will then
+    // be skipped in appendElementsUnique.
+    if (cursorResp) {
+        cursorResp->addToReplyWithoutWriteConcern(
+            CursorResponse::ResponseType::InitialResponse, useDocSequences, out);
+    }
+    auto bodyBuilder = out->getBodyBuilder();
     if (auto wcErrorElem = result["writeConcernError"]) {
-        appendWriteConcernErrorToCmdResponse(shard->getId(), wcErrorElem, *out);
+        appendWriteConcernErrorToCmdResponse(shard->getId(), wcErrorElem, bodyBuilder);
     }
 
-    out->appendElementsUnique(CommandHelpers::filterCommandReplyForPassthrough(result));
-
-    auto status = getStatusFromCommandResult(out->asTempObj());
+    bodyBuilder.appendElementsUnique(CommandHelpers::filterCommandReplyForPassthrough(result));
+    auto status = getStatusFromCommandResult(bodyBuilder.asTempObj());
     if (auto resolvedView = status.extraInfo<ResolvedView>()) {
         auto resolvedAggRequest = resolvedView->asExpandedViewAggregation(aggRequest);
         auto resolvedAggCmd = resolvedAggRequest.serializeToCommandObj().toBson();
-        out->resetToEmpty();
+        // Don't let views use DocumentSequences and renable them incase anything else needs to
+        // use the request
+        aggRequest.setTempOptInToDocumentSequences(useDocSequences);
+        bodyBuilder.doneFast();
+        out->reset();
 
         // We pass both the underlying collection namespace and the view namespace here. The
         // underlying collection namespace is used to execute the aggregation on mongoD. Any cursor
@@ -1091,6 +1131,7 @@ Status ClusterAggregate::aggPassthrough(OperationContext* opCtx,
             opCtx, nsStruct, resolvedAggRequest, resolvedAggCmd, out);
     }
 
+    aggRequest.setTempOptInToDocumentSequences(useDocSequences);
     return status;
 }
 

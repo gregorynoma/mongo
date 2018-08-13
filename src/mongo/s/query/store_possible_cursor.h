@@ -30,6 +30,7 @@
 
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/operation_context.h"
+#include "mongo/db/query/cursor_response.h"
 #include "mongo/db/query/tailable_mode.h"
 #include "mongo/s/client/shard.h"
 
@@ -47,6 +48,15 @@ class TaskExecutor;
 }  // namespace executor
 
 /**
+ * Response object used for storing cursors created based off exsting cursors on remote instances.
+ * See storePossibleCursor below for more details.
+ */
+struct RemoteCursorResponse {
+    boost::optional<CursorResponse> cursor;
+    BSONObj response;
+};
+
+/**
  * Utility function to create a cursor based on existing cursor on a remote instance.  'cmdResult'
  * must be the response object generated upon creation of the cursor. The newly created cursor will
  * use 'executor' to retrieve batches of results from the shards and is stored with 'cursorManager'.
@@ -56,9 +66,9 @@ class TaskExecutor;
  * may be different then the underlying collection namespace.
  *
  * If 'cmdResult' does not describe a command cursor response document or no cursor is specified,
- * returns 'cmdResult'. If a parsing error occurs, returns an error Status. Otherwise, returns a
- * BSONObj response document describing the newly-created cursor, which is suitable for returning to
- * the client.
+ * returns a RemoteCursorResponse with 'cmdResult' as 'response' and 'cursor' as none. If a parsing
+ * error occurs, returns an error Status. Otherwise, returns a RemoteCursorResponse with 'cursor'
+ * as the contents of the newly-created cursor and 'response' as 'cmdResult'.
  *
  * @ shardId the name of the shard on which the cursor-establishing command was run
  * @ server the exact host in the shard on which the cursor-establishing command was run
@@ -68,31 +78,32 @@ class TaskExecutor;
  * @ executor the TaskExecutor to store in the resulting ClusterClientCursor
  * @ cursorManager the ClusterCursorManager on which to register the resulting ClusterClientCursor
 */
-StatusWith<BSONObj> storePossibleCursor(OperationContext* opCtx,
-                                        const ShardId& shardId,
-                                        const HostAndPort& server,
-                                        const BSONObj& cmdResult,
-                                        const NamespaceString& requestedNss,
-                                        executor::TaskExecutor* executor,
-                                        ClusterCursorManager* cursorManager,
-                                        TailableModeEnum tailableMode = TailableModeEnum::kNormal);
+StatusWith<RemoteCursorResponse> storePossibleCursor(
+    OperationContext* opCtx,
+    const ShardId& shardId,
+    const HostAndPort& server,
+    const BSONObj& cmdResult,
+    const NamespaceString& requestedNss,
+    executor::TaskExecutor* executor,
+    ClusterCursorManager* cursorManager,
+    TailableModeEnum tailableMode = TailableModeEnum::kNormal);
 
 /**
  * Convenience function which extracts all necessary information from the passed RemoteCursor, and
  * stores a ClusterClientCursor based on it.
  */
-StatusWith<BSONObj> storePossibleCursor(OperationContext* opCtx,
-                                        const NamespaceString& requestedNss,
-                                        const RemoteCursor& remoteCursor,
-                                        TailableModeEnum tailableMode);
+StatusWith<RemoteCursorResponse> storePossibleCursor(OperationContext* opCtx,
+                                                     const NamespaceString& requestedNss,
+                                                     const RemoteCursor& remoteCursor,
+                                                     TailableModeEnum tailableMode);
 
 /**
  * Convenience function which extracts all necessary information from the passed CommandResponse,
  * and stores a ClusterClientCursor based on it.
  */
-StatusWith<BSONObj> storePossibleCursor(OperationContext* opCtx,
-                                        const NamespaceString& requestedNss,
-                                        const ShardId& shardId,
-                                        const Shard::CommandResponse& commandResponse,
-                                        TailableModeEnum tailableMode);
+StatusWith<RemoteCursorResponse> storePossibleCursor(OperationContext* opCtx,
+                                                     const NamespaceString& requestedNss,
+                                                     const ShardId& shardId,
+                                                     const Shard::CommandResponse& commandResponse,
+                                                     TailableModeEnum tailableMode);
 }  // namespace mongo

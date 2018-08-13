@@ -35,6 +35,7 @@
 #include "mongo/base/string_data.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/jsobj.h"
+#include "mongo/db/query/cursor_response.h"
 #include "mongo/s/async_requests_sender.h"
 #include "mongo/s/catalog_cache.h"
 #include "mongo/s/commands/strategy.h"
@@ -193,11 +194,13 @@ int getUniqueCodeFromCommandResults(const std::vector<Strategy::CommandResult>& 
 
 /**
  * Utility function to return an empty result set from a command.
+ *
+ * @return If the namespace from the command already exists, returns boost::none; otherwise, returns
+ *          an empty cursor on that namespace.
  */
-bool appendEmptyResultSet(OperationContext* opCtx,
-                          BSONObjBuilder& result,
-                          Status status,
-                          const std::string& ns);
+boost::optional<CursorResponse> makeEmptyResultSetCursorResponse(OperationContext* opCtx,
+                                                                 Status status,
+                                                                 const NamespaceString& ns);
 
 /**
  * If the specified database exists already, loads it in the cache (if not already there) and

@@ -164,6 +164,10 @@ StatusWith<std::unique_ptr<QueryRequest>> transformQueryForShards(
     // Therefore, we must always send singleBatch=false (wantMore=true) to the shards.
     newQR->setWantMore(true);
 
+    // Disable DocumentSequences within sharding and assemble DocumentSequence after (if requested).
+    // TODO: SERVER-36287 Implement DocumentSequence support all the way down through sharding.
+    newQR->setTempOptInToDocumentSequences(false);
+
     invariant(newQR->validate());
     return std::move(newQR);
 }

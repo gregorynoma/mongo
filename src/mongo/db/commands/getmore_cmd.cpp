@@ -256,15 +256,11 @@ public:
 
             // Cursors come in one of two flavors:
             // - Cursors owned by the collection cursor manager, such as those generated via the
-            // find
-            //   command. For these cursors, we hold the appropriate collection lock for the
-            //   duration of
-            //   the getMore using AutoGetCollectionForRead.
+            //   find command. For these cursors, we hold the appropriate collection lock for the
+            //   duration of the getMore using AutoGetCollectionForRead.
             // - Cursors owned by the global cursor manager, such as those generated via the
-            // aggregate
-            //   command. These cursors either hold no collection state or manage their collection
-            //   state
-            //   internally, so we acquire no locks.
+            //   aggregate command. These cursors either hold no collection state or manage their
+            //   collection state internally, so we acquire no locks.
             //
             // While we only need to acquire locks in the case of a cursor which is *not* globally
             // owned, we need to create an AutoStatsTracker in either case. This is responsible for
@@ -274,8 +270,7 @@ public:
             //
             // Note that we acquire our locks before our ClientCursorPin, in order to ensure that
             // the pin's destructor is called before the lock's destructor (if there is one) so that
-            // the
-            // cursor cleanup can occur under the lock.
+            // the cursor cleanup can occur under the lock.
             boost::optional<AutoGetCollectionForRead> readLock;
             boost::optional<AutoStatsTracker> statsTracker;
             CursorManager* cursorManager;
@@ -321,13 +316,10 @@ public:
             };
 
             // If the 'waitAfterPinningCursorBeforeGetMoreBatch' fail point is enabled, set the
-            // 'msg'
-            // field of this operation's CurOp to signal that we've hit this point and then
-            // repeatedly
-            // release and re-acquire the collection readLock at regular intervals until the
-            // failpoint
-            // is released. This is done in order to avoid deadlocks caused by the pinned-cursor
-            // failpoints in this file (see SERVER-21997).
+            // 'msg' field of this operation's CurOp to signal that we've hit this point and then
+            // repeatedly release and re-acquire the collection readLock at regular intervals until
+            // the failpoint is released. This is done in order to avoid deadlocks caused by the
+            // pinned-cursor failpoints in this file (see SERVER-21997).
             if (MONGO_FAIL_POINT(waitAfterPinningCursorBeforeGetMoreBatch)) {
                 CurOpFailpointHelpers::waitWhileFailPointEnabled(
                     &waitAfterPinningCursorBeforeGetMoreBatch,
@@ -418,8 +410,7 @@ public:
                 curOp->setPlanSummary_inlock(planSummary);
 
                 // Ensure that the original query or command object is available in the slow query
-                // log,
-                // profiler and currentOp.
+                // log, profiler and currentOp.
                 auto originatingCommand = cursor->getOriginatingCommandObj();
                 if (!originatingCommand.isEmpty()) {
                     curOp->setOriginatingCommand_inlock(originatingCommand);
@@ -427,8 +418,9 @@ public:
             }
 
             CursorId respondWithId = 0;
-
-            CursorResponseBuilder nextBatch(reply, CursorResponseBuilder::Options());
+            CursorResponseBuilder::Options options;
+            options.useDocumentSequences = _request.tempOptInToDocumentSequences;
+            CursorResponseBuilder nextBatch(reply, options);
             BSONObj obj;
             PlanExecutor::ExecState state = PlanExecutor::ADVANCED;
             long long numResults = 0;
@@ -448,12 +440,9 @@ public:
             }
 
             // We're about to begin running the PlanExecutor in order to fill the getMore batch. If
-            // the
-            // 'waitWithPinnedCursorDuringGetMoreBatch' failpoint is active, set the 'msg' field of
-            // this
-            // operation's CurOp to signal that we've hit this point and then spin until the
-            // failpoint
-            // is released.
+            // the 'waitWithPinnedCursorDuringGetMoreBatch' failpoint is active, set the 'msg' field
+            // of this operation's CurOp to signal that we've hit this point and then spin until the
+            // failpoint is released.
             if (MONGO_FAIL_POINT(waitWithPinnedCursorDuringGetMoreBatch)) {
                 CurOpFailpointHelpers::waitWhileFailPointEnabled(
                     &waitWithPinnedCursorDuringGetMoreBatch,
@@ -472,12 +461,10 @@ public:
             curOp->debug().setPlanSummaryMetrics(postExecutionStats);
 
             // We do not report 'execStats' for aggregation or other globally managed cursors, both
-            // in
-            // the original request and subsequent getMore. It would be useful to have this
-            // information
-            // for an aggregation, but the source PlanExecutor could be destroyed before we know
-            // whether
-            // we need execStats and we do not want to generate for all operations due to cost.
+            // in the original request and subsequent getMore. It would be useful to have this
+            // information for an aggregation, but the source PlanExecutor could be destroyed before
+            // we know whether we need execStats and we do not want to generate for all operations
+            // due to cost.
             if (!CursorManager::isGloballyManagedCursor(_request.cursorid) &&
                 curOp->shouldDBProfile()) {
                 BSONObjBuilder execStatsBob;
@@ -500,8 +487,7 @@ public:
             nextBatch.done(respondWithId, _request.nss.ns());
 
             // Ensure log and profiler include the number of results returned in this getMore's
-            // response
-            // batch.
+            // response batch.
             curOp->debug().nreturned = numResults;
 
             if (respondWithId) {
@@ -509,12 +495,10 @@ public:
             }
 
             // We're about to unpin the cursor as the ClientCursorPin goes out of scope (or delete
-            // it,
-            // if it has been exhausted). If the
-            // 'waitBeforeUnpinningOrDeletingCursorAfterGetMoreBatch'
-            // failpoint is active, set the 'msg' field of this operation's CurOp to signal that
-            // we've
-            // hit this point and then spin until the failpoint is released.
+            // it, if it has been exhausted). If the
+            // 'waitBeforeUnpinningOrDeletingCursorAfterGetMoreBatch' failpoint is active, set the
+            // 'msg' field of this operation's CurOp to signal that we've hit this point and then
+            // spin until the failpoint is released.
             if (MONGO_FAIL_POINT(waitBeforeUnpinningOrDeletingCursorAfterGetMoreBatch)) {
                 CurOpFailpointHelpers::waitWhileFailPointEnabled(
                     &waitBeforeUnpinningOrDeletingCursorAfterGetMoreBatch,

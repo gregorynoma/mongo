@@ -78,7 +78,7 @@ public:
                                const Namespaces& namespaces,
                                const AggregationRequest& request,
                                BSONObj cmdObj,
-                               BSONObjBuilder* result);
+                               rpc::ReplyBuilderInterface* result);
 
 private:
     static void uassertAllShardsSupportExplain(
@@ -96,13 +96,13 @@ private:
                                  const AggregationRequest& aggRequest,
                                  BSONObj cmd);
 
-    static Status aggPassthrough(OperationContext*,
-                                 const Namespaces&,
-                                 const ShardId&,
-                                 BSONObj cmd,
-                                 const AggregationRequest&,
-                                 const LiteParsedPipeline&,
-                                 BSONObjBuilder* result);
+    static Status aggPassthrough(OperationContext* opCtx,
+                                 const Namespaces& namespaces,
+                                 const ShardId& shardId,
+                                 BSONObj cmdObj,
+                                 const AggregationRequest& aggRequest,
+                                 const LiteParsedPipeline& liteParsedPipeline,
+                                 rpc::ReplyBuilderInterface* out);
 };
 
 }  // namespace mongo

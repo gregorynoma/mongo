@@ -79,14 +79,13 @@ TEST_F(StorePossibleCursorTest, ReturnsValidCursorResponse) {
                             nullptr,  // TaskExecutor
                             getManager());
     ASSERT_OK(outgoingCursorResponse.getStatus());
-
-    auto parsedOutgoingResponse = CursorResponse::parseFromBSON(outgoingCursorResponse.getValue());
-    ASSERT_OK(parsedOutgoingResponse.getStatus());
-    ASSERT_EQ(nss.toString(), parsedOutgoingResponse.getValue().getNSS().toString());
-    ASSERT_EQ(0U, parsedOutgoingResponse.getValue().getCursorId());
-    ASSERT_EQ(2U, parsedOutgoingResponse.getValue().getBatch().size());
-    ASSERT_BSONOBJ_EQ(fromjson("{_id: 1}"), parsedOutgoingResponse.getValue().getBatch()[0]);
-    ASSERT_BSONOBJ_EQ(fromjson("{_id: 2}"), parsedOutgoingResponse.getValue().getBatch()[1]);
+    ASSERT(outgoingCursorResponse.getValue().cursor != boost::none);
+    const auto& parsedOutgoingResponse = outgoingCursorResponse.getValue().cursor.get();
+    ASSERT_EQ(nss.toString(), parsedOutgoingResponse.getNSS().toString());
+    ASSERT_EQ(0U, parsedOutgoingResponse.getCursorId());
+    ASSERT_EQ(2U, parsedOutgoingResponse.getBatch().size());
+    ASSERT_BSONOBJ_EQ(fromjson("{_id: 1}"), parsedOutgoingResponse.getBatch()[0]);
+    ASSERT_BSONOBJ_EQ(fromjson("{_id: 2}"), parsedOutgoingResponse.getBatch()[1]);
 }
 
 // Test that storePossibleCursor() propagates an error if it cannot parse the cursor response.
@@ -115,7 +114,7 @@ TEST_F(StorePossibleCursorTest, PassesUpCommandResultIfItDoesNotDescribeACursor)
                                                       nullptr,  // TaskExecutor
                                                       getManager());
     ASSERT_OK(outgoingCursorResponse.getStatus());
-    ASSERT_BSONOBJ_EQ(notACursorObj, outgoingCursorResponse.getValue());
+    ASSERT_BSONOBJ_EQ(notACursorObj, outgoingCursorResponse.getValue().response);
 }
 
 }  // namespace

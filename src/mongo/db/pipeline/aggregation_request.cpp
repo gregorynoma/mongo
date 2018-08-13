@@ -59,6 +59,7 @@ constexpr StringData AggregationRequest::kExplainName;
 constexpr StringData AggregationRequest::kAllowDiskUseName;
 constexpr StringData AggregationRequest::kHintName;
 constexpr StringData AggregationRequest::kCommentName;
+constexpr StringData AggregationRequest::kTempOptInToDocumentSequencesName;
 
 constexpr long long AggregationRequest::kDefaultBatchSize;
 
@@ -132,6 +133,14 @@ StatusWith<AggregationRequest> AggregationRequest::parseFromBSON(
 
             hasCursorElem = true;
             request.setBatchSize(batchSize);
+        } else if (kTempOptInToDocumentSequencesName == fieldName) {
+            if (elem.type() != BSONType::Bool) {
+                return {ErrorCodes::TypeMismatch,
+                        str::stream() << kTempOptInToDocumentSequencesName
+                                      << " must be of type bool in: "
+                                      << cmdObj};
+            }
+            request.setTempOptInToDocumentSequences(elem.Bool());
         } else if (kCollationName == fieldName) {
             if (elem.type() != BSONType::Object) {
                 return {ErrorCodes::TypeMismatch,
@@ -289,6 +298,7 @@ Document AggregationRequest::serializeToCommandObj() const {
     MutableDocument serialized;
     return Document{
         {kCommandName, (_nss.isCollectionlessAggregateNS() ? Value(1) : Value(_nss.coll()))},
+        {kTempOptInToDocumentSequencesName, _tempOptInToDocumentSequences ? Value(true) : Value()},
         {kPipelineName, _pipeline},
         // Only serialize booleans if different than their default.
         {kAllowDiskUseName, _allowDiskUse ? Value(true) : Value()},

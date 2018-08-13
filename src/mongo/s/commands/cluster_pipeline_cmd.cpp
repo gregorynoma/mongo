@@ -68,8 +68,8 @@ public:
                                    const std::string& dbname,
                                    const BSONObj& cmdObj,
                                    boost::optional<ExplainOptions::Verbosity> verbosity,
-                                   BSONObjBuilder* result) {
-            const auto aggregationRequest =
+                                   rpc::ReplyBuilderInterface* result) {
+            auto aggregationRequest =
                 uassertStatusOK(AggregationRequest::parseFromBSON(dbname, cmdObj, verbosity));
 
             const auto& nss = aggregationRequest.getNamespaceString();
@@ -78,16 +78,14 @@ public:
                 opCtx, ClusterAggregate::Namespaces{nss, nss}, aggregationRequest, cmdObj, result));
         }
 
-        void run(OperationContext* opCtx, rpc::ReplyBuilderInterface* reply) override {
-            auto bob = reply->getBodyBuilder();
-            _runAggCommand(opCtx, _dbName, _request.body, boost::none, &bob);
+        void run(OperationContext* opCtx, rpc::ReplyBuilderInterface* result) override {
+            _runAggCommand(opCtx, _dbName, _request.body, boost::none, result);
         }
 
         void explain(OperationContext* opCtx,
                      ExplainOptions::Verbosity verbosity,
                      rpc::ReplyBuilderInterface* result) override {
-            auto bodyBuilder = result->getBodyBuilder();
-            _runAggCommand(opCtx, _dbName, _request.body, verbosity, &bodyBuilder);
+            _runAggCommand(opCtx, _dbName, _request.body, verbosity, result);
         }
 
         void doCheckAuthorization(OperationContext* opCtx) const override {

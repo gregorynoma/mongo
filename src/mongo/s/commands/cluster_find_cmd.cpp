@@ -159,8 +159,7 @@ public:
                     &bodyBuilder));
 
             } catch (const ExceptionFor<ErrorCodes::CommandOnShardedViewNotSupportedOnMongod>& ex) {
-                auto bodyBuilder = result->getBodyBuilder();
-                bodyBuilder.resetToEmpty();
+                result->reset();
 
                 auto aggCmdOnView = uassertStatusOK(qr->asAggregationCommand());
 
@@ -175,7 +174,7 @@ public:
                 nsStruct.executionNss = std::move(ex->getNamespace());
 
                 uassertStatusOK(ClusterAggregate::runAggregate(
-                    opCtx, nsStruct, resolvedAggRequest, resolvedAggCmd, &bodyBuilder));
+                    opCtx, nsStruct, resolvedAggRequest, resolvedAggCmd, result));
             }
         }
 
@@ -205,6 +204,8 @@ public:
                 // Build the response document.
                 CursorResponseBuilder::Options options;
                 options.isInitialResponse = true;
+                options.useDocumentSequences =
+                    cq->getQueryRequest().getTempOptInToDocumentSequences();
                 CursorResponseBuilder firstBatch(result, options);
                 for (const auto& obj : batch) {
                     firstBatch.append(obj);
@@ -229,9 +230,8 @@ public:
                 nsStruct.requestedNss = ns();
                 nsStruct.executionNss = std::move(ex->getNamespace());
 
-                auto bodyBuilder = result->getBodyBuilder();
                 uassertStatusOK(ClusterAggregate::runAggregate(
-                    opCtx, nsStruct, resolvedAggRequest, resolvedAggCmd, &bodyBuilder));
+                    opCtx, nsStruct, resolvedAggRequest, resolvedAggCmd, result));
             }
         }
 
