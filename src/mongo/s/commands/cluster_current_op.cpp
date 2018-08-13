@@ -37,6 +37,7 @@
 #include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/client.h"
 #include "mongo/db/pipeline/document.h"
+#include "mongo/rpc/op_msg_rpc_impls.h"
 #include "mongo/s/commands/cluster_aggregate.h"
 
 namespace mongo {
@@ -68,26 +69,30 @@ private:
         pipeline->push_back(sortBuilder.obj());
     }
 
-    virtual StatusWith<CursorResponse> runAggregation(
-        OperationContext* opCtx, const AggregationRequest& request) const final {
+    virtual StatusWith<CursorResponse> runAggregation(OperationContext* opCtx,
+                                                      AggregationRequest& request) const final {
+        // SERVER-36287 Disable DocumentSequences in current op
+        const auto useDocumentSequences = request.getTempOptInToDocumentSequences();
+        request.setTempOptInToDocumentSequences(false);
         auto aggCmdObj = request.serializeToCommandObj().toBson();
         auto nss = request.getNamespaceString();
 
-        BSONObjBuilder responseBuilder;
 
+        rpc::OpMsgReplyBuilder replyBuilder;
         auto status = ClusterAggregate::runAggregate(opCtx,
                                                      ClusterAggregate::Namespaces{nss, nss},
                                                      request,
                                                      std::move(aggCmdObj),
-                                                     &responseBuilder);
+                                                     &replyBuilder);
+        request.setTempOptInToDocumentSequences(useDocumentSequences);
 
         if (!status.isOK()) {
             return status;
         }
 
-        CommandHelpers::appendSimpleCommandStatus(responseBuilder, true);
-
-        return CursorResponse::parseFromBSON(responseBuilder.obj());
+        auto bodyBuilder = replyBuilder.getBodyBuilder();
+        CommandHelpers::appendSimpleCommandStatus(bodyBuilder, true);
+        return CursorResponse::parseFromBSON(replyBuilder.releaseBody());
     }
 
 } clusterCurrentOpCmd;

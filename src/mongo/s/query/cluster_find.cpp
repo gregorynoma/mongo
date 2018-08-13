@@ -182,6 +182,10 @@ std::vector<std::pair<ShardId, BSONObj>> constructRequestsForShards(
     const auto qrToForward = uassertStatusOK(
         transformQueryForShards(query.getQueryRequest(), appendGeoNearDistanceProjection));
 
+    // Disable DocumentSequences within sharding and assemble DocumentSequence after (if requested).
+    // TODO: SERVER-36287 Implement DocumentSequence support all the way down through sharding.
+    qrToForward->setTempOptInToDocumentSequences(false);
+
     if (atClusterTime) {
         auto readConcernAtClusterTime =
             appendAtClusterTimeToReadConcern(qrToForward->getReadConcern(), *atClusterTime);

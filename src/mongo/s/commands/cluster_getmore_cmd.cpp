@@ -79,9 +79,10 @@ public:
         void run(OperationContext* opCtx, rpc::ReplyBuilderInterface* reply) override {
             // Counted as a getMore, not as a command.
             globalOpCounters.gotGetMore();
-            auto bob = reply->getBodyBuilder();
             auto response = uassertStatusOK(ClusterFind::runGetMore(opCtx, _request));
-            response.addToBSON(CursorResponse::ResponseType::SubsequentResponse, &bob);
+            response.addToReply(CursorResponse::ResponseType::SubsequentResponse,
+                                reply,
+                                _request.tempOptInToDocumentSequences);
         }
 
         const GetMoreRequest _request;

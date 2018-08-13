@@ -211,7 +211,7 @@ TEST(GetMoreRequestTest, parseFromBSONHasMaxTimeMSOfZero) {
 
 TEST(GetMoreRequestTest, toBSONHasBatchSize) {
     GetMoreRequest request(
-        NamespaceString("testdb.testcoll"), 123, 99, boost::none, boost::none, boost::none);
+        NamespaceString("testdb.testcoll"), 123, 99, boost::none, boost::none, boost::none, false);
     BSONObj requestObj = request.toBSON();
     BSONObj expectedRequest = BSON("getMore" << CursorId(123) << "collection"
                                              << "testcoll"
@@ -226,7 +226,8 @@ TEST(GetMoreRequestTest, toBSONMissingMatchSize) {
                            boost::none,
                            boost::none,
                            boost::none,
-                           boost::none);
+                           boost::none,
+                           false);
     BSONObj requestObj = request.toBSON();
     BSONObj expectedRequest = BSON("getMore" << CursorId(123) << "collection"
                                              << "testcoll");
@@ -235,7 +236,7 @@ TEST(GetMoreRequestTest, toBSONMissingMatchSize) {
 
 TEST(GetMoreRequestTest, toBSONHasTerm) {
     GetMoreRequest request(
-        NamespaceString("testdb.testcoll"), 123, 99, boost::none, 1, boost::none);
+        NamespaceString("testdb.testcoll"), 123, 99, boost::none, 1, boost::none, false);
     BSONObj requestObj = request.toBSON();
     BSONObj expectedRequest = BSON("getMore" << CursorId(123) << "collection"
                                              << "testcoll"
@@ -252,7 +253,8 @@ TEST(GetMoreRequestTest, toBSONHasCommitLevel) {
                            99,
                            boost::none,
                            1,
-                           repl::OpTime(Timestamp(0, 10), 2));
+                           repl::OpTime(Timestamp(0, 10), 2),
+                           false);
     BSONObj requestObj = request.toBSON();
     BSONObj expectedRequest = BSON("getMore" << CursorId(123) << "collection"
                                              << "testcoll"
@@ -271,7 +273,8 @@ TEST(GetMoreRequestTest, toBSONHasMaxTimeMS) {
                            boost::none,
                            Milliseconds(789),
                            boost::none,
-                           boost::none);
+                           boost::none,
+                           false);
     BSONObj requestObj = request.toBSON();
     BSONObj expectedRequest = BSON("getMore" << CursorId(123) << "collection"
                                              << "testcoll"

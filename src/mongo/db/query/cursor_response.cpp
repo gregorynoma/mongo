@@ -86,6 +86,7 @@ void CursorResponseBuilder::done(CursorId cursorId, StringData cursorNamespace) 
 
 void CursorResponseBuilder::abandon() {
     invariant(_active);
+    _docSeqBuilder.reset();
     _batch.reset();
     _cursorObject.reset();
     _bodyBuilder.reset();
@@ -218,21 +219,23 @@ StatusWith<CursorResponse> CursorResponse::parseFromBSON(const BSONObj& cmdRespo
              writeConcernError ? writeConcernError.Obj().getOwned() : boost::optional<BSONObj>{}}};
 }
 
-void CursorResponse::addToBSON(CursorResponse::ResponseType responseType,
-                               BSONObjBuilder* builder) const {
+// The document sequences should be appended to the replyBuilder.
+void CursorResponse::_appendCursor(CursorResponse::ResponseType responseType,
+                                   BSONObjBuilder* builder,
+                                   bool useDocumentSequences,
+                                   bool appendWriteConcern) const {
     BSONObjBuilder cursorBuilder(builder->subobjStart(kCursorField));
-
     cursorBuilder.append(kIdField, _cursorId);
     cursorBuilder.append(kNsField, _nss.ns());
 
-    const char* batchFieldName =
-        (responseType == ResponseType::InitialResponse) ? kBatchFieldInitial : kBatchField;
-    BSONArrayBuilder batchBuilder(cursorBuilder.subarrayStart(batchFieldName));
-    for (const BSONObj& obj : _batch) {
-        batchBuilder.append(obj);
+    if (!useDocumentSequences) {
+        const char* batchFieldName =
+            (responseType == ResponseType::InitialResponse) ? kBatchFieldInitial : kBatchField;
+        BSONArrayBuilder batchBuilder(cursorBuilder.subarrayStart(batchFieldName));
+        for (const BSONObj& obj : _batch) {
+            batchBuilder.append(obj);
+        }
     }
-    batchBuilder.doneFast();
-
     cursorBuilder.doneFast();
 
     if (_latestOplogTimestamp) {
@@ -240,10 +243,62 @@ void CursorResponse::addToBSON(CursorResponse::ResponseType responseType,
     }
     builder->append("ok", 1.0);
 
-    if (_writeConcernError) {
+    // We need to check appendWriteConcern because cluster aggregate appends writeConcernError
+    // itself with the shard ID
+    if (_writeConcernError && appendWriteConcern) {
         builder->append("writeConcernError", *_writeConcernError);
     }
 }
+
+void CursorResponse::addToBSON(CursorResponse::ResponseType responseType,
+                               BSONObjBuilder* builder) const {
+    _appendCursor(responseType, builder, false, true);
+}
+
+void CursorResponse::addToReply(CursorResponse::ResponseType responseType,
+                                rpc::ReplyBuilderInterface* reply,
+                                bool useDocumentSequences) const {
+    if (!useDocumentSequences) {
+        auto bob = reply->getBodyBuilder();
+        _appendCursor(responseType, &bob, useDocumentSequences, true);
+        return;
+    }
+    const char* batchFieldName = (responseType == ResponseType::InitialResponse)
+        ? kBatchDocSequenceFieldInitial
+        : kBatchDocSequenceField;
+    {
+        auto docSeq = reply->getDocSequenceBuilder(batchFieldName);
+        for (const auto& obj : _batch) {
+            docSeq.append(obj);
+        }
+    }
+
+    auto bob = reply->getBodyBuilder();
+    _appendCursor(responseType, &bob, useDocumentSequences, true);
+}
+
+void CursorResponse::addToReplyWithoutWriteConcern(CursorResponse::ResponseType responseType,
+                                                   rpc::ReplyBuilderInterface* reply,
+                                                   bool useDocumentSequences) const {
+    if (!useDocumentSequences) {
+        auto bob = reply->getBodyBuilder();
+        _appendCursor(responseType, &bob, useDocumentSequences, false);
+        return;
+    }
+    const char* batchFieldName = (responseType == ResponseType::InitialResponse)
+        ? kBatchDocSequenceFieldInitial
+        : kBatchDocSequenceField;
+    {
+        auto docSeq = reply->getDocSequenceBuilder(batchFieldName);
+        for (const auto& obj : _batch) {
+            docSeq.append(obj);
+        }
+    }
+
+    auto bob = reply->getBodyBuilder();
+    _appendCursor(responseType, &bob, useDocumentSequences, false);
+}
+
 
 BSONObj CursorResponse::toBSON(CursorResponse::ResponseType responseType) const {
     BSONObjBuilder builder;

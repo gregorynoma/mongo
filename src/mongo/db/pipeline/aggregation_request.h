@@ -58,6 +58,8 @@ public:
     static constexpr StringData kAllowDiskUseName = "allowDiskUse"_sd;
     static constexpr StringData kHintName = "hint"_sd;
     static constexpr StringData kCommentName = "comment"_sd;
+    static constexpr StringData kTempOptInToDocumentSequencesName =
+        "tempOptInToDocumentSequences"_sd;
 
     static constexpr long long kDefaultBatchSize = 101;
 
@@ -119,6 +121,10 @@ public:
 
     long long getBatchSize() const {
         return _batchSize;
+    }
+
+    bool getTempOptInToDocumentSequences() const {
+        return _tempOptInToDocumentSequences;
     }
 
     const NamespaceString& getNamespaceString() const {
@@ -242,6 +248,10 @@ public:
         _unwrappedReadPref = unwrappedReadPref.getOwned();
     }
 
+    void setTempOptInToDocumentSequences(bool tempOptInToDocumentSequences) {
+        _tempOptInToDocumentSequences = tempOptInToDocumentSequences;
+    }
+
 private:
     // Required fields.
     const NamespaceString _nss;
@@ -279,6 +289,7 @@ private:
     bool _fromMongos = false;
     bool _needsMerge = false;
     bool _bypassDocumentValidation = false;
+    bool _tempOptInToDocumentSequences = false;
 
     // A user-specified maxTimeMS limit, or a value of '0' if not specified.
     unsigned int _maxTimeMS = 0;

@@ -138,9 +138,8 @@ public:
             nsStruct.requestedNss = nss;
             nsStruct.executionNss = resolvedAggRequest.getNamespaceString();
 
-            auto bodyBuilder = result->getBodyBuilder();
             return ClusterAggregate::runAggregate(
-                opCtx, nsStruct, resolvedAggRequest, resolvedAggCmd, &bodyBuilder);
+                opCtx, nsStruct, resolvedAggRequest, resolvedAggCmd, result);
         }
 
         long long millisElapsed = timer.millis();

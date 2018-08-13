@@ -101,7 +101,7 @@ bool handleCursorCommand(OperationContext* opCtx,
         uassert(
             ErrorCodes::BadValue, "the exchange initial batch size must be zero", batchSize == 0);
 
-        BSONArrayBuilder cursorsBuilder;
+        std::vector<BSONObj> cursorsBuilder;
         for (size_t idx = 0; idx < cursors.size(); ++idx) {
             invariant(cursors[idx]);
 
@@ -110,7 +110,7 @@ bool handleCursorCommand(OperationContext* opCtx,
                 cursors[idx]->cursorid(), nsForCursor.ns(), BSONArray(), &cursorResult);
             cursorResult.appendBool("ok", 1);
 
-            cursorsBuilder.append(cursorResult.obj());
+            cursorsBuilder.push_back(cursorResult.obj());
 
             // If a time limit was set on the pipeline, remaining time is "rolled over" to the
             // cursor (for use by future getmore ops).
@@ -122,14 +122,24 @@ bool handleCursorCommand(OperationContext* opCtx,
             cursors[idx]->getExecutor()->detachFromOperationContext();
         }
 
-        auto bodyBuilder = result->getBodyBuilder();
-        bodyBuilder.appendArray("cursors", cursorsBuilder.obj());
-
+        if (request.getTempOptInToDocumentSequences()) {
+            auto docSeqBuilder = result->getDocSequenceBuilder("cursors");
+            for (const auto& bson : cursorsBuilder) {
+                docSeqBuilder.append(bson);
+            }
+        } else {
+            auto bodyBuilder = result->getBodyBuilder();
+            BSONArrayBuilder cursorsArrayBuilder(bodyBuilder.subarrayStart("cursors"));
+            for (const auto& bson : cursorsBuilder) {
+                cursorsArrayBuilder.append(bson);
+            }
+        }
         return true;
     }
 
     CursorResponseBuilder::Options options;
     options.isInitialResponse = true;
+    options.useDocumentSequences = request.getTempOptInToDocumentSequences();
     CursorResponseBuilder responseBuilder(result, options);
 
     ClientCursor* cursor = cursors[0];
