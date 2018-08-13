@@ -259,35 +259,27 @@ std::pair<rpc::UniqueReply, std::shared_ptr<DBClientBase>> DBClientBase::runComm
     return {std::move(out.first), std::move(me)};
 }
 
-std::tuple<bool, DBClientBase*> DBClientBase::runCommandWithTarget(const string& dbname,
-                                                                   BSONObj cmd,
-                                                                   BSONObj& info,
-                                                                   int options) {
+std::tuple<rpc::UniqueReply, DBClientBase*> DBClientBase::runCommandWithTarget(const string& dbname,
+                                                                               BSONObj cmd,
+                                                                               int options) {
     // TODO: This will be downconverted immediately if the underlying
     // requestBuilder is a legacyRequest builder. Not sure what the best
     // way to get around that is without breaking the abstraction.
     auto result = runCommandWithTarget(rpc::upconvertRequest(dbname, std::move(cmd), options));
-
-    info = result.first->getCommandReply().getOwned();
-    return std::make_tuple(isOk(info), result.second);
+    return std::move(result);
 }
 
-std::tuple<bool, std::shared_ptr<DBClientBase>> DBClientBase::runCommandWithTarget(
-    const string& dbname,
-    BSONObj cmd,
-    BSONObj& info,
-    std::shared_ptr<DBClientBase> me,
-    int options) {
+std::tuple<rpc::UniqueReply, std::shared_ptr<DBClientBase>> DBClientBase::runCommandWithTarget(
+    const string& dbname, BSONObj cmd, std::shared_ptr<DBClientBase> me, int options) {
     auto result =
         runCommandWithTarget(rpc::upconvertRequest(dbname, std::move(cmd), options), std::move(me));
-
-    info = result.first->getCommandReply().getOwned();
-    return std::make_tuple(isOk(info), result.second);
+    return std::move(result);
 }
 
 bool DBClientBase::runCommand(const string& dbname, BSONObj cmd, BSONObj& info, int options) {
-    auto res = runCommandWithTarget(dbname, std::move(cmd), info, options);
-    return std::get<0>(res);
+    auto res = runCommandWithTarget(dbname, std::move(cmd), options);
+    info = std::get<0>(res)->getCommandReply().getOwned();
+    return isOk(info);
 }
 
 

@@ -29,6 +29,7 @@
 #pragma once
 
 #include "mongo/base/disallow_copying.h"
+#include "mongo/rpc/op_msg.h"
 #include "mongo/rpc/protocol.h"
 
 namespace mongo {
@@ -56,6 +57,20 @@ public:
      * checks only - runtime behavior changes should be implemented with polymorphism.
      */
     virtual Protocol getProtocol() const = 0;
+
+    /**
+     * Checks if the underlying message supports AND contains any DocumentSequences.
+     **/
+    virtual bool hasDocumentSequences() const {
+        return false;
+    }
+
+    /**
+     * The resulting DocumentSequences from the executed command.
+     */
+    virtual const std::vector<OpMsg::DocumentSequence>& getDocumentSequences() const {
+        MONGO_UNREACHABLE;
+    }
 
 protected:
     ReplyInterface() = default;

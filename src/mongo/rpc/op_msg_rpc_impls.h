@@ -45,6 +45,13 @@ public:
     rpc::Protocol getProtocol() const override {
         return rpc::Protocol::kOpMsg;
     }
+    bool hasDocumentSequences() const override {
+        return _msg.sequences.size() > 0;
+    }
+    const std::vector<OpMsg::DocumentSequence>& getDocumentSequences() const override {
+        invariant(_msg.sequences.size() > 0);
+        return _msg.sequences;
+    }
 
 private:
     OpMsg _msg;
