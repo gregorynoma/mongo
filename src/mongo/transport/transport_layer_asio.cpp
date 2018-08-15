@@ -375,11 +375,11 @@ private:
     using Results = Resolver::results_type;
     StatusWith<Results> _checkResults(StatusWith<Results> results, const HostAndPort& peer) {
         if (!results.isOK()) {
-            return Status{ErrorCodes::HostNotFound,
+            return Status{ErrorCodes::DNSHostNotFound,
                           str::stream() << "Could not find address for " << peer << ": "
                                         << results.getStatus()};
         } else if (results.getValue().empty()) {
-            return Status{ErrorCodes::HostNotFound,
+            return Status{ErrorCodes::DNSHostNotFound,
                           str::stream() << "Could not find address for " << peer};
         } else {
             return results;
@@ -534,7 +534,7 @@ Future<SessionHandle> TransportLayerASIO::asyncConnect(HostAndPort peer,
     Future<SessionHandle> mergedFuture = std::move(pf.future);
 
     if (connector->peer.host().empty()) {
-        return Status{ErrorCodes::HostNotFound, "Hostname or IP address to connect to is empty"};
+        return Status{ErrorCodes::DNSHostNotFound, "Hostname or IP address to connect to is empty"};
     }
 
     if (timeout > Milliseconds{0} && timeout < Milliseconds::max()) {

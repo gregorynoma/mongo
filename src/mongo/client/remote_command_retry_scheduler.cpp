@@ -109,7 +109,7 @@ const std::initializer_list<ErrorCodes::Error> RemoteCommandRetryScheduler::kAll
     // to be retried if idempotency can be guaranteed.
     ErrorCodes::WriteConcernFailed,
     ErrorCodes::HostUnreachable,
-    ErrorCodes::HostNotFound,
+    ErrorCodes::DNSHostNotFound,
     ErrorCodes::NetworkTimeout,
     ErrorCodes::PrimarySteppedDown,
     ErrorCodes::InterruptedDueToStepDown,

@@ -579,7 +579,7 @@ TEST_F(DBsClonerTest, DatabasesClonerResendsListDatabasesRequestOnRetriableError
 
     // Respond to first listDatabases request with a retriable error.
     assertRemoteCommandNameEquals("listDatabases",
-                                  net->scheduleErrorResponse(Status(ErrorCodes::HostNotFound, "")));
+                                  net->scheduleErrorResponse(Status(ErrorCodes::NodeNotFound, "")));
     net->runReadyNetworkOperations();
 
     // DatabasesCloner stays active because it resends the listDatabases request.

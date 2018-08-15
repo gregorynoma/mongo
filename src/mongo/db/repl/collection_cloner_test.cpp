@@ -255,7 +255,7 @@ TEST_F(CollectionClonerTest, CollectionClonerResendsCountCommandOnRetriableError
 
     {
         executor::NetworkInterfaceMock::InNetworkGuard guard(getNet());
-        processNetworkResponse(ErrorCodes::HostNotFound, "");
+        processNetworkResponse(ErrorCodes::NodeNotFound, "");
         processNetworkResponse(ErrorCodes::NetworkTimeout, "");
         processNetworkResponse(createCountResponse(100));
     }
@@ -269,7 +269,7 @@ TEST_F(CollectionClonerTest, CollectionClonerReturnsLastRetriableErrorOnExceedin
 
     {
         executor::NetworkInterfaceMock::InNetworkGuard guard(getNet());
-        processNetworkResponse(ErrorCodes::HostNotFound, "");
+        processNetworkResponse(ErrorCodes::NodeNotFound, "");
         processNetworkResponse(ErrorCodes::NetworkTimeout, "");
         processNetworkResponse(ErrorCodes::NotMaster, "");
     }
@@ -478,7 +478,7 @@ TEST_F(CollectionClonerTest, CollectionClonerResendsListIndexesCommandOnRetriabl
 
     // Respond to first listIndexes request with a retriable error.
     assertRemoteCommandNameEquals("listIndexes",
-                                  net->scheduleErrorResponse(Status(ErrorCodes::HostNotFound, "")));
+                                  net->scheduleErrorResponse(Status(ErrorCodes::NodeNotFound, "")));
     net->runReadyNetworkOperations();
     ASSERT_TRUE(collectionCloner->isActive());
 
@@ -763,7 +763,7 @@ TEST_F(CollectionClonerTest, CollectionClonerResendsFindCommandOnRetriableError)
 
     // Respond to the find request with a retriable error.
     assertRemoteCommandNameEquals("find",
-                                  net->scheduleErrorResponse(Status(ErrorCodes::HostNotFound, "")));
+                                  net->scheduleErrorResponse(Status(ErrorCodes::NodeNotFound, "")));
     net->runReadyNetworkOperations();
     ASSERT_TRUE(collectionCloner->isActive());
 

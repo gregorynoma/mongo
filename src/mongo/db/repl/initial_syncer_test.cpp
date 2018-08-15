@@ -1269,7 +1269,7 @@ TEST_F(InitialSyncerTest,
 
     // Last oplog entry first attempt - retriable error.
     assertRemoteCommandNameEquals("find",
-                                  net->scheduleErrorResponse(Status(ErrorCodes::HostNotFound, "")));
+                                  net->scheduleErrorResponse(Status(ErrorCodes::NodeNotFound, "")));
     net->runReadyNetworkOperations();
 
     // InitialSyncer stays active because it resends the find request for the last oplog entry.
@@ -1470,7 +1470,7 @@ TEST_F(InitialSyncerTest, InitialSyncerResendsFindCommandIfFCVFetcherReturnsRetr
 
     // FCV first attempt - retriable error.
     assertRemoteCommandNameEquals("find",
-                                  net->scheduleErrorResponse(Status(ErrorCodes::HostNotFound, "")));
+                                  net->scheduleErrorResponse(Status(ErrorCodes::NodeNotFound, "")));
     net->runReadyNetworkOperations();
 
     // InitialSyncer stays active because it resends the find request for the fCV.

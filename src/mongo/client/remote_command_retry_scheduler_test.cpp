@@ -318,7 +318,7 @@ TEST_F(RemoteCommandRetrySchedulerTest,
        ShuttingDownExecutorAfterSchedulerStartupInvokesCallbackWithCallbackCanceledError) {
     CallbackResponseSaver callback;
     auto policy = RemoteCommandRetryScheduler::makeRetryPolicy(
-        10U, Milliseconds(1), {ErrorCodes::HostNotFound});
+        10U, Milliseconds(1), {ErrorCodes::DNSHostNotFound});
     RemoteCommandRetryScheduler scheduler(
         &getExecutor(), request, stdx::ref(callback), std::move(policy));
     start(&scheduler);
@@ -340,7 +340,7 @@ TEST_F(RemoteCommandRetrySchedulerTest,
        ShuttingDownSchedulerAfterSchedulerStartupInvokesCallbackWithCallbackCanceledError) {
     CallbackResponseSaver callback;
     auto policy = RemoteCommandRetryScheduler::makeRetryPolicy(
-        10U, Milliseconds(1), {ErrorCodes::HostNotFound});
+        10U, Milliseconds(1), {ErrorCodes::DNSHostNotFound});
     RemoteCommandRetryScheduler scheduler(
         &getExecutor(), request, stdx::ref(callback), std::move(policy));
     start(&scheduler);
@@ -372,7 +372,7 @@ TEST_F(RemoteCommandRetrySchedulerTest, SchedulerInvokesCallbackOnNonRetryableEr
 TEST_F(RemoteCommandRetrySchedulerTest, SchedulerInvokesCallbackOnFirstSuccessfulResponse) {
     CallbackResponseSaver callback;
     auto policy = RemoteCommandRetryScheduler::makeRetryPolicy(
-        10U, Milliseconds(1), {ErrorCodes::HostNotFound});
+        10U, Milliseconds(1), {ErrorCodes::DNSHostNotFound});
     RemoteCommandRetryScheduler scheduler(
         &getExecutor(), request, stdx::ref(callback), std::move(policy));
     start(&scheduler);
@@ -391,7 +391,7 @@ TEST_F(RemoteCommandRetrySchedulerTest, SchedulerInvokesCallbackOnFirstSuccessfu
 TEST_F(RemoteCommandRetrySchedulerTest, SchedulerIgnoresEmbeddedErrorInSuccessfulResponse) {
     CallbackResponseSaver callback;
     auto policy = RemoteCommandRetryScheduler::makeRetryPolicy(
-        10U, Milliseconds(1), {ErrorCodes::HostNotFound});
+        10U, Milliseconds(1), {ErrorCodes::DNSHostNotFound});
     RemoteCommandRetryScheduler scheduler(
         &getExecutor(), request, stdx::ref(callback), std::move(policy));
     start(&scheduler);
@@ -413,18 +413,18 @@ TEST_F(RemoteCommandRetrySchedulerTest,
        SchedulerInvokesCallbackWithErrorFromExecutorIfScheduleRemoteCommandFailsOnRetry) {
     CallbackResponseSaver callback;
     auto policy = RemoteCommandRetryScheduler::makeRetryPolicy(
-        3U, executor::RemoteCommandRequest::kNoTimeout, {ErrorCodes::HostNotFound});
+        3U, executor::RemoteCommandRequest::kNoTimeout, {ErrorCodes::DNSHostNotFound});
     TaskExecutorWithFailureInScheduleRemoteCommand badExecutor(&getExecutor());
     RemoteCommandRetryScheduler scheduler(
         &badExecutor, request, stdx::ref(callback), std::move(policy));
     start(&scheduler);
 
-    processNetworkResponse({ErrorCodes::HostNotFound, "first", Milliseconds(0)});
+    processNetworkResponse({ErrorCodes::DNSHostNotFound, "first", Milliseconds(0)});
 
     // scheduleRemoteCommand() will fail with ErrorCodes::ShutdownInProgress when trying to send
     // third remote command request after processing second failed response.
     badExecutor.scheduleRemoteCommandFailPoint = true;
-    processNetworkResponse({ErrorCodes::HostNotFound, "second", Milliseconds(0)});
+    processNetworkResponse({ErrorCodes::DNSHostNotFound, "second", Milliseconds(0)});
 
     checkCompletionStatus(
         &scheduler, callback, {ErrorCodes::ShutdownInProgress, "", Milliseconds(0)});
@@ -441,7 +441,7 @@ TEST_F(RemoteCommandRetrySchedulerTest,
         &getExecutor(), request, stdx::ref(callback), std::move(policy));
     start(&scheduler);
 
-    processNetworkResponse({ErrorCodes::HostNotFound, "first", Milliseconds(0)});
+    processNetworkResponse({ErrorCodes::DNSHostNotFound, "first", Milliseconds(0)});
     processNetworkResponse({ErrorCodes::HostUnreachable, "second", Milliseconds(0)});
 
     ResponseStatus response(ErrorCodes::NetworkTimeout, "last", Milliseconds(0));
@@ -452,12 +452,12 @@ TEST_F(RemoteCommandRetrySchedulerTest,
 TEST_F(RemoteCommandRetrySchedulerTest, SchedulerShouldRetryUntilSuccessfulResponseIsReceived) {
     CallbackResponseSaver callback;
     auto policy = RemoteCommandRetryScheduler::makeRetryPolicy(
-        3U, executor::RemoteCommandRequest::kNoTimeout, {ErrorCodes::HostNotFound});
+        3U, executor::RemoteCommandRequest::kNoTimeout, {ErrorCodes::DNSHostNotFound});
     RemoteCommandRetryScheduler scheduler(
         &getExecutor(), request, stdx::ref(callback), std::move(policy));
     start(&scheduler);
 
-    processNetworkResponse({ErrorCodes::HostNotFound, "first", Milliseconds(0)});
+    processNetworkResponse({ErrorCodes::DNSHostNotFound, "first", Milliseconds(0)});
 
     ResponseStatus response(BSON("ok" << 1 << "x" << 123 << "z" << 456), Milliseconds(100));
     processNetworkResponse(response);
@@ -505,7 +505,7 @@ TEST_F(RemoteCommandRetrySchedulerTest,
     policyPtr->scheduler = &scheduler;
     start(&scheduler);
 
-    processNetworkResponse({ErrorCodes::HostNotFound, "first", Milliseconds(0)});
+    processNetworkResponse({ErrorCodes::DNSHostNotFound, "first", Milliseconds(0)});
 
     checkCompletionStatus(&scheduler,
                           callback,
